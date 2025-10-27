@@ -10,7 +10,8 @@
     "deploy": "npx vercel"
   },
   "dependencies": {
-    "@vercel/blob": "^0.20.0"
+    "@vercel/blob": "^0.20.0",
+    "@vercel/kv": "^1.0.0"
   },
   "devDependencies": {
     "vercel": "^32.7.2"

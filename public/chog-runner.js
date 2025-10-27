@@ -299,7 +299,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
   // Leaderboard functions
   async function saveToLeaderboard(score) {
     try {
-      const response = await fetch('/api/leaderboard/save', {
+      const response = await fetch('/api/leaderboard/kv', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -327,7 +327,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
   async function loadLeaderboard() {
     try {
       console.log('Loading leaderboard...');
-      const response = await fetch('/api/leaderboard/get');
+      const response = await fetch('/api/leaderboard/kv');
       console.log('Response status:', response.status);
       
       if (response.ok) {
