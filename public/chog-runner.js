@@ -326,11 +326,18 @@ var parallax = { t:0, clouds:[], mountains:[] };
 
   async function loadLeaderboard() {
     try {
+      console.log('Loading leaderboard...');
       const response = await fetch('/api/leaderboard/get');
+      console.log('Response status:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
+        console.log('Leaderboard data:', data);
         leaderboard = data.leaderboard || [];
+        console.log('Leaderboard array:', leaderboard);
         updateLeaderboardDisplay();
+      } else {
+        console.error('Failed to load leaderboard:', response.status);
       }
     } catch (error) {
       console.error('Error loading leaderboard:', error);
@@ -338,9 +345,17 @@ var parallax = { t:0, clouds:[], mountains:[] };
   }
 
   function updateLeaderboardDisplay() {
-    if (!leaderboardList) return;
+    console.log('Updating leaderboard display...');
+    console.log('leaderboardList element:', leaderboardList);
+    console.log('leaderboard array length:', leaderboard.length);
+    
+    if (!leaderboardList) {
+      console.error('leaderboardList element not found!');
+      return;
+    }
     
     if (leaderboard.length === 0) {
+      console.log('No scores to display');
       leaderboardList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 10px;">No scores yet!</div>';
       return;
     }
