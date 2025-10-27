@@ -51,10 +51,22 @@
         </div>
       </div>
       <div id="gameOverOverlay" class="overlay" style="display:none">
-        <div class="panel">
+        <div class="panel" style="max-width: 400px; width: 90vw;">
           <div style="font-weight:800; font-size:22px; margin-bottom:6px;">Game Over</div>
           <div id="scoreLine" style="font-size: 14px; color:#334155; margin-bottom:10px;"></div>
-          <button class="btn" id="restartBtn">Restart (R)</button>
+          
+          <div id="playerNameSection" style="margin-bottom: 15px;">
+            <input type="text" id="playerNameInput" placeholder="Enter your name" 
+                   style="width: 100%; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px; font-size: 14px;">
+            <button class="btn" id="saveScoreBtn" style="width: 100%;">Save Score</button>
+          </div>
+          
+          <div id="leaderboardSection" style="display: none;">
+            <div style="font-weight: 600; font-size: 16px; margin-bottom: 8px;">🏆 Leaderboard</div>
+            <div id="leaderboardList" style="text-align: left; font-size: 13px; max-height: 200px; overflow-y: auto;"></div>
+          </div>
+          
+          <button class="btn" id="restartBtn" style="margin-top: 10px;">Restart (R)</button>
         </div>
       </div>
     </div>

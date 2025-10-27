@@ -29,6 +29,11 @@ var parallax = { t:0, clouds:[], mountains:[] };
   const gameOverOverlay = document.getElementById("gameOverOverlay");
   const scoreLine = document.getElementById("scoreLine");
   const restartBtn = document.getElementById("restartBtn");
+  const playerNameInput = document.getElementById("playerNameInput");
+  const saveScoreBtn = document.getElementById("saveScoreBtn");
+  const playerNameSection = document.getElementById("playerNameSection");
+  const leaderboardSection = document.getElementById("leaderboardSection");
+  const leaderboardList = document.getElementById("leaderboardList");
 
   // World state
   const world = { w: BASE_W, h: BASE_H, groundY: 210, speed: 6, speedTarget: 6, t: 0 };
@@ -84,6 +89,8 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let gameOver = false;
   let score = 0;
   let high = parseInt(localStorage.getItem("chog_highscore") || "0", 10) || 0;
+  let leaderboard = [];
+  let playerName = "";
 
   // Pixel-based gap control
   let distSinceLast = 0;
@@ -289,6 +296,75 @@ var parallax = { t:0, clouds:[], mountains:[] };
   function show(el){ el.style.display = ""; }
   function hide(el){ el.style.display = "none"; }
 
+  // Leaderboard functions
+  async function saveToLeaderboard(score) {
+    try {
+      const response = await fetch('/api/leaderboard/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          playerName: playerName || 'Anonymous',
+          score: score,
+          timestamp: Date.now()
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        leaderboard = data.leaderboard || [];
+        updateLeaderboardDisplay();
+        console.log('Score saved to leaderboard');
+      } else {
+        console.error('Failed to save score to leaderboard');
+      }
+    } catch (error) {
+      console.error('Error saving to leaderboard:', error);
+    }
+  }
+
+  async function loadLeaderboard() {
+    try {
+      const response = await fetch('/api/leaderboard/get');
+      if (response.ok) {
+        const data = await response.json();
+        leaderboard = data.leaderboard || [];
+        updateLeaderboardDisplay();
+      }
+    } catch (error) {
+      console.error('Error loading leaderboard:', error);
+    }
+  }
+
+  function updateLeaderboardDisplay() {
+    if (!leaderboardList) return;
+    
+    if (leaderboard.length === 0) {
+      leaderboardList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 10px;">No scores yet!</div>';
+      return;
+    }
+
+    const html = leaderboard.map((entry, index) => {
+      const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
+      const date = new Date(entry.timestamp).toLocaleDateString();
+      return `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #f1f5f9;">
+          <div>
+            <span style="margin-right: 8px;">${medal}</span>
+            <span style="font-weight: ${index < 3 ? '600' : '400'};">${entry.playerName}</span>
+          </div>
+          <div style="color: #64748b; font-size: 12px;">
+            <div>${entry.score.toLocaleString()}</div>
+            <div>${date}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    leaderboardList.innerHTML = html;
+  }
+
   function resetGame(){
     world.speed = 6; world.speedTarget = 6; world.t = 0;
     chog.y = world.groundY - chog.h; chog.vy = 0; chog.onGround = true; chog.duck = false; chog.frame = 0;
@@ -303,6 +379,16 @@ var parallax = { t:0, clouds:[], mountains:[] };
     invincibleFor = 0;
     multiplierFor = 0;
     scoreMultiplier = 1;
+    
+    // Reset UI elements
+    playerNameSection.style.display = 'none';
+    leaderboardSection.style.display = 'none';
+    playerNameInput.value = '';
+    saveScoreBtn.textContent = 'Save Score';
+    saveScoreBtn.disabled = false;
+    
+    // Load leaderboard on game reset
+    loadLeaderboard();
 }
 
   function spawnObstacle(){
@@ -598,6 +684,12 @@ function drawHUD(){
     high = Math.max(high, score);
     localStorage.setItem("chog_highscore", String(high));
     scoreLine.textContent = `Score: ${score} · Best: ${high}`;
+    
+    // Show player name input and leaderboard
+    playerNameSection.style.display = 'block';
+    leaderboardSection.style.display = 'block';
+    updateLeaderboardDisplay();
+    
     hide(startOverlay); show(gameOverOverlay);
   }
 
@@ -640,6 +732,27 @@ function drawHUD(){
   });
   restartBtn.addEventListener("click", () => {
     resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
+  });
+
+  // Save score button event listener
+  saveScoreBtn.addEventListener("click", async () => {
+    const name = playerNameInput.value.trim();
+    if (name) {
+      playerName = name;
+      await saveToLeaderboard(score);
+      playerNameSection.style.display = 'none';
+      saveScoreBtn.textContent = 'Score Saved!';
+      saveScoreBtn.disabled = true;
+    } else {
+      alert('Please enter your name!');
+    }
+  });
+
+  // Enter key support for player name input
+  playerNameInput.addEventListener("keypress", (e) => {
+    if (e.key === 'Enter') {
+      saveScoreBtn.click();
+    }
   });
 
   // Init
