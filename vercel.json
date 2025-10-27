@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "api/leaderboard/save.js": {
+      "maxDuration": 10
+    },
+    "api/leaderboard/get.js": {
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/leaderboard/(.*)",
+      "destination": "/api/leaderboard/$1"
+    }
+  ]
+}
