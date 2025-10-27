@@ -1,4 +1,6 @@
 {
+  "buildCommand": "echo 'No build step needed'",
+  "outputDirectory": "public",
   "functions": {
     "api/leaderboard/save.js": {
       "maxDuration": 10
