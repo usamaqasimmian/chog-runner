@@ -1,4 +1,4 @@
-import { put } from "@vercel/blob";
+import { put, get } from "@vercel/blob";
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -23,12 +23,10 @@ export default async function handler(req, res) {
     // Get existing leaderboard data
     let leaderboard = [];
     try {
-      // Try to fetch existing leaderboard from blob
-      const response = await fetch(`${process.env.VERCEL_URL || 'http://localhost:3000'}/api/leaderboard/get`);
-      if (response.ok) {
-        const data = await response.json();
-        leaderboard = data.leaderboard || [];
-      }
+      // Try to get existing leaderboard from blob storage directly
+      const blob = await get('leaderboard/scores.json');
+      const data = JSON.parse(blob);
+      leaderboard = data.leaderboard || [];
     } catch (error) {
       console.log('No existing leaderboard found, starting fresh');
     }
