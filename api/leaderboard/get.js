@@ -8,8 +8,11 @@ export default async function handler(req, res) {
   try {
     // Try to get leaderboard data from blob storage
     try {
+      console.log('Attempting to get blob: leaderboard/scores.json');
       const blob = await get('leaderboard/scores.json');
+      console.log('Blob retrieved:', blob);
       const data = JSON.parse(blob);
+      console.log('Parsed data:', data);
       
       res.status(200).json({ 
         success: true, 
@@ -17,6 +20,7 @@ export default async function handler(req, res) {
       });
     } catch (blobError) {
       // If blob doesn't exist, return empty leaderboard
+      console.log('Blob error:', blobError.message);
       console.log('No leaderboard blob found, returning empty leaderboard');
       res.status(200).json({ 
         success: true, 
