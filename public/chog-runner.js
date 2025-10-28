@@ -716,9 +716,9 @@ function drawHUD(){
 
   // Input
   function keydown(e){
-    const isJump = (e.code === "ArrowUp" || e.key === "ArrowUp");
+    const isJump = (e.code === "Space" || e.code === "ArrowUp" || e.key === " " || e.key === "ArrowUp");
     const isDuckDown = (e.code === "ArrowDown" || e.key === "ArrowDown");
-    const isSpace = (e.code === "Space" || e.key === " ");
+    const isEnter = (e.code === "Enter" || e.key === "Enter");
     
     // Check if user is typing in the name input field
     const isTypingName = document.activeElement === playerNameInput;
@@ -732,18 +732,14 @@ function drawHUD(){
       }
     }
     if (isDuckDown){ chog.duck = chog.onGround; }
-    if (isSpace){
+    if (isEnter && !isTypingName){
       e.preventDefault();
-      if (gameOver && !isTypingName){
-        // Space restarts the game when game is over and not typing
+      if (gameOver){
+        // Enter restarts the game when game is over and not typing
         resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
       } else if (!running && !gameOver){
-        // Space starts the game
+        // Enter starts the game
         running = true; hide(startOverlay);
-      } else if (!gameOver){
-        // Space jumps during gameplay
-        if (chog.onGround){ jump(false); }
-        else if (allowDoubleJump && !usedSecondJump){ usedSecondJump = true; chog.vy = -11.5; }
       }
     }
   }
