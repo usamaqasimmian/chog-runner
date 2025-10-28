@@ -32,8 +32,10 @@ var parallax = { t:0, clouds:[], mountains:[] };
   const playerNameInput = document.getElementById("playerNameInput");
   const saveScoreBtn = document.getElementById("saveScoreBtn");
   const playerNameSection = document.getElementById("playerNameSection");
-  const leaderboardSection = document.getElementById("leaderboardSection");
-  const leaderboardList = document.getElementById("leaderboardList");
+  const viewLeaderboardBtn = document.getElementById("viewLeaderboardBtn");
+  const leaderboardModal = document.getElementById("leaderboardModal");
+  const modalLeaderboardList = document.getElementById("modalLeaderboardList");
+  const closeLeaderboard = document.getElementById("closeLeaderboard");
 
   // World state
   const world = { w: BASE_W, h: BASE_H, groundY: 210, speed: 6, speedTarget: 6, t: 0 };
@@ -346,17 +348,17 @@ var parallax = { t:0, clouds:[], mountains:[] };
 
   function updateLeaderboardDisplay() {
     console.log('Updating leaderboard display...');
-    console.log('leaderboardList element:', leaderboardList);
+    console.log('modalLeaderboardList element:', modalLeaderboardList);
     console.log('leaderboard array length:', leaderboard.length);
     
-    if (!leaderboardList) {
-      console.error('leaderboardList element not found!');
+    if (!modalLeaderboardList) {
+      console.error('modalLeaderboardList element not found!');
       return;
     }
     
     if (leaderboard.length === 0) {
       console.log('No scores to display');
-      leaderboardList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 10px;">No scores yet!</div>';
+      modalLeaderboardList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 20px;">No scores yet!</div>';
       return;
     }
 
@@ -364,20 +366,20 @@ var parallax = { t:0, clouds:[], mountains:[] };
       const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
       const date = new Date(entry.timestamp).toLocaleDateString();
       return `
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #f1f5f9;">
-          <div>
-            <span style="margin-right: 8px;">${medal}</span>
-            <span style="font-weight: ${index < 3 ? '600' : '400'};">${entry.playerName}</span>
+        <div class="leaderboard-item">
+          <div class="player-info">
+            <span class="medal">${medal}</span>
+            <span class="player-name">${entry.playerName}</span>
           </div>
-          <div style="color: #64748b; font-size: 12px;">
-            <div>${entry.score.toLocaleString()}</div>
-            <div>${date}</div>
+          <div class="score-info">
+            <div class="score-value">${entry.score.toLocaleString()}</div>
+            <div class="score-date">${date}</div>
           </div>
         </div>
       `;
     }).join('');
 
-    leaderboardList.innerHTML = html;
+    modalLeaderboardList.innerHTML = html;
   }
 
   function resetGame(){
@@ -397,7 +399,6 @@ var parallax = { t:0, clouds:[], mountains:[] };
     
     // Reset UI elements
     playerNameSection.style.display = 'none';
-    leaderboardSection.style.display = 'none';
     playerNameInput.value = '';
     saveScoreBtn.textContent = 'Save Score';
     saveScoreBtn.disabled = false;
@@ -700,9 +701,8 @@ function drawHUD(){
     localStorage.setItem("chog_highscore", String(high));
     scoreLine.textContent = `Score: ${score} · Best: ${high}`;
     
-    // Show player name input and leaderboard
+    // Show player name input
     playerNameSection.style.display = 'block';
-    leaderboardSection.style.display = 'block';
     updateLeaderboardDisplay();
     
     hide(startOverlay); show(gameOverOverlay);
@@ -781,6 +781,29 @@ function drawHUD(){
   playerNameInput.addEventListener("keypress", (e) => {
     if (e.key === 'Enter') {
       saveScoreBtn.click();
+    }
+  });
+
+  // Leaderboard modal functionality
+  viewLeaderboardBtn.addEventListener("click", () => {
+    leaderboardModal.style.display = 'flex';
+  });
+
+  closeLeaderboard.addEventListener("click", () => {
+    leaderboardModal.style.display = 'none';
+  });
+
+  // Close modal when clicking outside
+  leaderboardModal.addEventListener("click", (e) => {
+    if (e.target === leaderboardModal) {
+      leaderboardModal.style.display = 'none';
+    }
+  });
+
+  // Close modal with Escape key
+  document.addEventListener("keydown", (e) => {
+    if (e.key === 'Escape' && leaderboardModal.style.display === 'flex') {
+      leaderboardModal.style.display = 'none';
     }
   });
 

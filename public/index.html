@@ -36,6 +36,22 @@
       border-radius:16px; padding:14px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.07); text-align:center; }
     .btn { display:inline-block; background:#0f172a; color:#fff; border:none; border-radius:12px; padding:8px 16px; cursor:pointer; }
     .tip { color:var(--muted); font-size:13px; margin: 12px 0; text-align:center; }
+    
+    /* Leaderboard Modal */
+    .modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; z-index:1000; }
+    .modal-content { background:#fff; border-radius:16px; padding:20px; max-width:500px; width:90vw; max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3); }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; }
+    .modal-title { font-size:20px; font-weight:700; margin:0; }
+    .close-btn { background:none; border:none; font-size:24px; cursor:pointer; color:#64748b; }
+    .close-btn:hover { color:#0f172a; }
+    .leaderboard-item { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; }
+    .leaderboard-item:last-child { border-bottom:none; }
+    .player-info { display:flex; align-items:center; }
+    .medal { margin-right:10px; font-size:18px; }
+    .player-name { font-weight:500; }
+    .score-info { text-align:right; color:#64748b; font-size:14px; }
+    .score-value { font-weight:600; color:#0f172a; }
+    .score-date { font-size:12px; }
   </style>
 </head>
 <body>
@@ -61,17 +77,27 @@
             <button class="btn" id="saveScoreBtn" style="width: 100%;">Save Score</button>
           </div>
           
-          <div id="leaderboardSection" style="display: none;">
-            <div style="font-weight: 600; font-size: 16px; margin-bottom: 8px;">🏆 Leaderboard</div>
-            <div id="leaderboardList" style="text-align: left; font-size: 13px; max-height: 200px; overflow-y: auto;"></div>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button class="btn" id="viewLeaderboardBtn" style="flex: 1;">View Leaderboard</button>
+            <button class="btn" id="restartBtn" style="flex: 1;">Restart (Space)</button>
           </div>
-          
-          <button class="btn" id="restartBtn" style="margin-top: 10px;">Restart (Space)</button>
         </div>
       </div>
     </div>
     <div class="tip">The longer you run, faster it gets.</div>
   </div>
+  
+  <!-- Leaderboard Modal -->
+  <div id="leaderboardModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">🏆 Leaderboard</h2>
+        <button class="close-btn" id="closeLeaderboard">&times;</button>
+      </div>
+      <div id="modalLeaderboardList"></div>
+    </div>
+  </div>
+  
   <script src="chog-runner.js"></script>
 </body>
 </html>
