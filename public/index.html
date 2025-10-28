@@ -34,7 +34,43 @@
       overflow:hidden;
       margin: 0 auto;
     }
-    canvas { width:100%; height:100%; display:block; background:#fff; }
+    canvas { 
+      width:100%; 
+      height:100%; 
+      display:block; 
+      background:#fff;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -khtml-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+    }
+    
+    /* Mobile Canvas Optimizations */
+    @media (max-width: 768px) {
+      .stage {
+        width: 95vw;
+        max-width: 500px;
+        aspect-ratio: 16 / 9;
+        border-radius: 12px;
+        margin: 10px auto;
+      }
+      canvas {
+        image-rendering: -webkit-optimize-contrast;
+        image-rendering: crisp-edges;
+        image-rendering: pixelated;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .stage {
+        width: 98vw;
+        aspect-ratio: 4 / 3;
+        margin: 5px auto;
+      }
+    }
     .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
     .panel { pointer-events:auto; background:rgba(255,255,255,.9); border:1px solid var(--border);
       border-radius:16px; padding:14px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.07); text-align:center; }

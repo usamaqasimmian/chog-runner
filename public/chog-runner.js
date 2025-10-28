@@ -5,22 +5,52 @@ var parallax = { t:0, clouds:[], mountains:[] };
 // ground-only obstacles, 200–600 px random gaps, coin chase, HUD, feet-aligned sprite,
 // smoothed motion, initial render, DPR-correct drawing.
 (function(){
+  // Mobile detection (moved to top)
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+  
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
-  const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+  
+  // Mobile-optimized device pixel ratio
+  const dpr = isMobile ? Math.min(2, window.devicePixelRatio || 1) : Math.max(1, Math.floor(window.devicePixelRatio || 1));
 
-  // Logical world units
-  const BASE_W = 900, BASE_H = 260;
+  // Logical world units - adjusted for mobile
+  const BASE_W = isMobile ? 400 : 900;
+  const BASE_H = isMobile ? 225 : 260;
+  
+  // Set canvas size with mobile optimization
   canvas.width = BASE_W * dpr;
   canvas.height = BASE_H * dpr;
   ctx.scale(dpr, dpr);
 
-  // Scale CSS size to fit the stage container (handled by CSS), but keep for safety
+  // Mobile-optimized scaling
   function fitToWindow(){
-    const el = canvas; // stage container keeps aspect via CSS
+    const el = canvas;
     el.style.width = "100%";
     el.style.height = "100%";
+    
+    // Mobile-specific optimizations
+    if (isMobile) {
+      // Ensure canvas fits mobile screen properly
+      const container = el.parentElement;
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      
+      // Maintain aspect ratio while fitting container
+      const aspectRatio = BASE_W / BASE_H;
+      let newWidth = containerWidth;
+      let newHeight = containerWidth / aspectRatio;
+      
+      if (newHeight > containerHeight) {
+        newHeight = containerHeight;
+        newWidth = containerHeight * aspectRatio;
+      }
+      
+      el.style.width = newWidth + 'px';
+      el.style.height = newHeight + 'px';
+    }
   }
+  
   fitToWindow();
   window.addEventListener('resize', fitToWindow);
 
@@ -96,8 +126,6 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let leaderboard = [];
   let playerName = "";
 
-  // Mobile detection
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
 
   // Pixel-based gap control
   let distSinceLast = 0;
@@ -755,11 +783,22 @@ function drawHUD(){
   document.addEventListener("keydown", keydown);
   document.addEventListener("keyup", keyup);
 
+  // Canvas touch/click handling
   canvas.addEventListener("pointerdown", () => {
     if (gameOver) return;
     if (!running){ running = true; hide(startOverlay); }
     jump();
   });
+
+  // Mobile-specific canvas touch handling
+  if (isMobile) {
+    canvas.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      if (gameOver) return;
+      if (!running){ running = true; hide(startOverlay); }
+      jump();
+    }, { passive: false });
+  }
   restartBtn.addEventListener("click", () => {
     resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
   });
@@ -843,6 +882,12 @@ function drawHUD(){
 
   // Mobile optimizations
   if (isMobile) {
+    // Canvas performance optimizations
+    ctx.imageSmoothingEnabled = false;
+    ctx.webkitImageSmoothingEnabled = false;
+    ctx.mozImageSmoothingEnabled = false;
+    ctx.msImageSmoothingEnabled = false;
+    
     // Prevent zoom on double tap
     let lastTouchEnd = 0;
     document.addEventListener('touchend', function (event) {
@@ -855,7 +900,7 @@ function drawHUD(){
 
     // Prevent scrolling on touch
     document.addEventListener('touchmove', function (e) {
-      if (e.target === touchJump || e.target === touchDuck) {
+      if (e.target === touchJump || e.target === touchDuck || e.target === canvas) {
         e.preventDefault();
       }
     }, { passive: false });
@@ -865,6 +910,10 @@ function drawHUD(){
     document.body.style.position = 'fixed';
     document.body.style.width = '100%';
     document.body.style.height = '100%';
+    
+    // Optimize canvas for mobile
+    canvas.style.imageRendering = 'pixelated';
+    canvas.style.imageRendering = '-webkit-optimize-contrast';
   }
 
   // Init
