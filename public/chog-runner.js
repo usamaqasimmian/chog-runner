@@ -40,8 +40,8 @@ var parallax = { t:0, clouds:[], mountains:[] };
   const chog = { x: 80, y: 0, w: 46, h: 44, vy: 0, onGround: true, duck: false, frame: 0 };
   const logo = { x: 360, y: 140, w: 34, h: 34, vx: 0, active: true, cooldown: 0 };
   // Smaller player hitbox (ignores hair & shadow)
-  // Insets in world pixels
-  const CHOG_HITBOX = { left: 16, right: 14, top: 14, bottom: 12 }; // very small torso-only box
+  // Insets in world pixels - made more reasonable for better collision detection
+  const CHOG_HITBOX = { left: 8, right: 6, top: 8, bottom: 6 }; // more reasonable hitbox
   function getChogHitbox(){
     // when ducking, visual draw height is slightly smaller; keep box consistent but a bit lower
     const hb = {
@@ -519,7 +519,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
       scheduleNextPower();
     }
     for (const o of obstacles){
-      if (collide(getChogHitbox(), o, 4) && invincibleFor <= 0){
+      if (collide(getChogHitbox(), o, 0) && invincibleFor <= 0){
         endGame(); updateParticles();
     drawFrame(); return;
       }
@@ -716,9 +716,13 @@ function drawHUD(){
 
   // Input
   function keydown(e){
-    const isJump = (e.code === "Space" || e.code === "ArrowUp" || e.key === " " || e.key === "ArrowUp");
+    const isJump = (e.code === "ArrowUp" || e.key === "ArrowUp");
     const isDuckDown = (e.code === "ArrowDown" || e.key === "ArrowDown");
-    const isRestart = (e.code === "KeyR" || e.key === "r" || e.key === "R");
+    const isSpace = (e.code === "Space" || e.key === " ");
+    
+    // Check if user is typing in the name input field
+    const isTypingName = document.activeElement === playerNameInput;
+    
     if (isJump){
       e.preventDefault();
       if (!running && !gameOver){ running = true; hide(startOverlay); }
@@ -728,9 +732,19 @@ function drawHUD(){
       }
     }
     if (isDuckDown){ chog.duck = chog.onGround; }
-    if (isRestart){
+    if (isSpace){
       e.preventDefault();
-      resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
+      if (gameOver && !isTypingName){
+        // Space restarts the game when game is over and not typing
+        resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
+      } else if (!running && !gameOver){
+        // Space starts the game
+        running = true; hide(startOverlay);
+      } else if (!gameOver){
+        // Space jumps during gameplay
+        if (chog.onGround){ jump(false); }
+        else if (allowDoubleJump && !usedSecondJump){ usedSecondJump = true; chog.vy = -11.5; }
+      }
     }
   }
   function keyup(e){
