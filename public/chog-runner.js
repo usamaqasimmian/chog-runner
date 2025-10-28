@@ -36,6 +36,8 @@ var parallax = { t:0, clouds:[], mountains:[] };
   const leaderboardModal = document.getElementById("leaderboardModal");
   const modalLeaderboardList = document.getElementById("modalLeaderboardList");
   const closeLeaderboard = document.getElementById("closeLeaderboard");
+  const touchJump = document.getElementById("touchJump");
+  const touchDuck = document.getElementById("touchDuck");
 
   // World state
   const world = { w: BASE_W, h: BASE_H, groundY: 210, speed: 6, speedTarget: 6, t: 0 };
@@ -93,6 +95,9 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let high = parseInt(localStorage.getItem("chog_highscore") || "0", 10) || 0;
   let leaderboard = [];
   let playerName = "";
+
+  // Mobile detection
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
 
   // Pixel-based gap control
   let distSinceLast = 0;
@@ -759,6 +764,39 @@ function drawHUD(){
     resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
   });
 
+  // Touch Controls for Mobile
+  touchJump.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    if (gameOver) return;
+    if (!running){ running = true; hide(startOverlay); }
+    jump();
+  });
+
+  touchDuck.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    if (!gameOver) {
+      chog.duck = chog.onGround;
+    }
+  });
+
+  touchDuck.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    chog.duck = false;
+  });
+
+  // Prevent default touch behaviors
+  document.addEventListener("touchstart", (e) => {
+    if (e.target === touchJump || e.target === touchDuck) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  document.addEventListener("touchend", (e) => {
+    if (e.target === touchJump || e.target === touchDuck) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
   // Save score button event listener
   saveScoreBtn.addEventListener("click", async () => {
     const name = playerNameInput.value.trim();
@@ -802,6 +840,32 @@ function drawHUD(){
       leaderboardModal.style.display = 'none';
     }
   });
+
+  // Mobile optimizations
+  if (isMobile) {
+    // Prevent zoom on double tap
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function (event) {
+      const now = (new Date()).getTime();
+      if (now - lastTouchEnd <= 300) {
+        event.preventDefault();
+      }
+      lastTouchEnd = now;
+    }, false);
+
+    // Prevent scrolling on touch
+    document.addEventListener('touchmove', function (e) {
+      if (e.target === touchJump || e.target === touchDuck) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    // Add mobile-specific styling
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
+  }
 
   // Init
   resetGame();
