@@ -24,11 +24,13 @@ export default async function handler(req, res) {
   const issuedAt = Date.now();
   const expiresAt = issuedAt + ttlMs;
   const sessionId = crypto.randomUUID();
+  const powerSeed = crypto.randomInt(0, 0xFFFFFFFF);
   const sessionRecord = {
     id: sessionId,
     issuedAt,
     expiresAt,
-    used: false
+    used: false,
+    powerSeed
   };
 
   let client;
@@ -60,7 +62,8 @@ export default async function handler(req, res) {
   return res.status(200).json({
     sessionId,
     issuedAt,
-    expiresAt
+    expiresAt,
+    powerSeed
   });
 }
 

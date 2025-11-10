@@ -94,7 +94,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
   function sec(s){ return Math.round(s * FPS); }
 
   let powerCoin = { active:false, x:0, y:0, w:34, h:34, vx:0 };
-  let nextPowerAt = sec(5) + Math.floor(Math.random()*sec(12)); // 5–17s
+  let nextPowerAt = Number.POSITIVE_INFINITY;
 
   let invincibleFor = 0;   // frames
   let multiplierFor = 0;   // frames
@@ -116,18 +116,38 @@ var parallax = { t:0, clouds:[], mountains:[] };
     };
   }
 
+  function createMulberry32(seed){
+    let t = seed >>> 0;
+    return function next(){
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function getPowerRandom(){
+    if (powerRng) return powerRng();
+    return Math.random();
+  }
+
   function computeScoreFromSummary(stats){
     return (stats.baseScore || 0) + (stats.multiplierBonus || 0) + (stats.coinsCollected || 0) * 100;
   }
 
   function normaliseSummaryForPayload(stats){
+    if (!stats || !stats.startedAt || !stats.endedAt){
+      throw new Error('Run timing data missing');
+    }
     return {
       frames: Math.max(0, Math.floor(stats.frames || 0)),
       baseScore: Math.max(0, Math.floor(stats.baseScore || 0)),
       multiplierFrames: Math.max(0, Math.floor(stats.multiplierFrames || 0)),
       multiplierBonus: Math.max(0, Math.floor(stats.multiplierBonus || 0)),
       coinsCollected: Math.max(0, Math.floor(stats.coinsCollected || 0)),
-      powerCoinsCollected: Math.max(0, Math.floor(stats.powerCoinsCollected || 0))
+      powerCoinsCollected: Math.max(0, Math.floor(stats.powerCoinsCollected || 0)),
+      startedAt: Math.max(0, Math.floor(stats.startedAt || 0)),
+      endedAt: Math.max(0, Math.floor(stats.endedAt || 0))
     };
   }
 
@@ -155,8 +175,13 @@ var parallax = { t:0, clouds:[], mountains:[] };
       id: payload.sessionId,
       issuedAt: payload.issuedAt || Date.now(),
       expiresAt: payload.expiresAt || Date.now() + 5 * 60 * 1000,
-      used: false
+      used: false,
+      powerSeed: typeof payload.powerSeed === 'number' ? payload.powerSeed : null
     };
+    powerRng = currentSession.powerSeed !== null ? createMulberry32(currentSession.powerSeed) : null;
+    if (!running) {
+      scheduleNextPower(true);
+    }
     return currentSession;
   }
 
@@ -217,6 +242,9 @@ var parallax = { t:0, clouds:[], mountains:[] };
     }
     runSummary = createEmptySummary();
     runSummary.startedAt = Date.now();
+    if (powerRng){
+      scheduleNextPower(true);
+    }
     running = true;
     hide(startOverlay);
     hide(gameOverOverlay);
@@ -224,8 +252,12 @@ var parallax = { t:0, clouds:[], mountains:[] };
   }
 
 
-  function scheduleNextPower(){
-    nextPowerAt = world.t + sec(5) + Math.floor(Math.random()*sec(12));
+  function scheduleNextPower(reset=false){
+    const delay = sec(5) + Math.floor(getPowerRandom()*sec(12));
+    nextPowerAt = world.t + delay;
+    if (reset) {
+      powerCoin.active = false;
+    }
   }
   /* === POWER-UP VARIANTS === */
   // 0: score x50 (blue glow) — 10s
@@ -236,7 +268,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let usedSecondJump = false;
 
   function choosePowerType(){
-    powerType = Math.floor(Math.random()*3);
+    powerType = Math.floor(getPowerRandom()*3);
   }
 
 
@@ -251,6 +283,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let runSummary = createEmptySummary();
   let finalSummary = null;
   let saveInFlight = false;
+  let powerRng = null;
 
 
   // Pixel-based gap control
@@ -498,6 +531,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
         session.used = true;
         currentSession = null;
         finalSummary = null;
+        powerRng = null;
         ensureLeaderboardSession();
         return true;
       } else {
@@ -579,7 +613,11 @@ var parallax = { t:0, clouds:[], mountains:[] };
     score = 0; gameOver = false;
     hide(gameOverOverlay); show(startOverlay);
       powerCoin.active = false;
-    scheduleNextPower();
+    if (powerRng){
+      scheduleNextPower(true);
+    } else {
+      nextPowerAt = Number.POSITIVE_INFINITY;
+    }
     invincibleFor = 0;
     multiplierFor = 0;
     scoreMultiplier = 1;
@@ -588,6 +626,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (currentSession && !currentSession.used) {
       currentSession = null;
     }
+    powerRng = null;
     ensureLeaderboardSession();
     
     // Reset UI elements
