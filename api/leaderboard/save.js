@@ -27,9 +27,7 @@ export default async function handler(req, res) {
       const blob = await get('leaderboard/scores.json');
       const data = JSON.parse(blob);
       leaderboard = data.leaderboard || [];
-    } catch (error) {
-      console.log('No existing leaderboard found, starting fresh');
-    }
+    } catch (error) {}
 
     // Add new entry
     leaderboard.push(leaderboardEntry);
@@ -52,7 +50,6 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Error saving leaderboard:', error);
     res.status(500).json({ error: 'Failed to save leaderboard' });
   }
 }

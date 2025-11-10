@@ -11,7 +11,6 @@ export default async function handler(req, res) {
         leaderboard: leaderboard.sort((a, b) => b.score - a.score).slice(0, 10)
       });
     } catch (error) {
-      console.error('Error getting leaderboard:', error);
       res.status(500).json({ error: 'Failed to get leaderboard' });
     }
     return;
@@ -49,7 +48,6 @@ export default async function handler(req, res) {
         leaderboard
       });
     } catch (error) {
-      console.error('Error saving leaderboard:', error);
       res.status(500).json({ error: 'Failed to save leaderboard' });
     }
     return;

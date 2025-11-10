@@ -22,7 +22,6 @@ export default async function handler(req, res) {
         leaderboard: leaderboard.sort((a, b) => b.score - a.score).slice(0, 10)
       });
     } catch (error) {
-      console.error('Error getting leaderboard:', error);
       res.status(500).json({ error: 'Failed to get leaderboard' });
     }
     return;
@@ -30,7 +29,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const { playerName, score, timestamp, sessionId, summary, hash } = req.body || {};
+      const { playerName, score, timestamp, sessionId, summary } = req.body || {};
 
       if (!playerName || typeof playerName !== 'string') {
         return res.status(400).json({ error: 'Missing player name' });
@@ -76,14 +75,8 @@ export default async function handler(req, res) {
           now
         });
       } catch (validationError) {
-        console.warn('Score verification failed', validationError);
         await client.disconnect();
         return res.status(400).json({ error: validationError.message || 'Invalid run submission' });
-      }
-
-      if (hash && typeof hash === 'string') {
-        // Retain hash for log correlation
-        console.log(`Leaderboard submission hash=${hash} session=${sessionId}`);
       }
 
       // Get existing leaderboard
@@ -117,7 +110,6 @@ export default async function handler(req, res) {
         leaderboard
       });
     } catch (error) {
-      console.error('Error saving leaderboard:', error);
       res.status(500).json({ error: 'Failed to save leaderboard' });
     }
     return;

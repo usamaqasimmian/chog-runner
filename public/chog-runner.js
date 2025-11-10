@@ -160,7 +160,6 @@ var parallax = { t:0, clouds:[], mountains:[] };
       const bytes = Array.from(new Uint8Array(digest));
       return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
     } catch (error) {
-      console.warn('Failed to hash run summary', error);
       return null;
     }
   }
@@ -192,7 +191,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (!pendingSessionPromise) {
       pendingSessionPromise = requestLeaderboardSession()
         .catch((error) => {
-          console.error('Failed to establish leaderboard session', error);
+          // swallow
           currentSession = null;
           return null;
         })
@@ -527,7 +526,6 @@ var parallax = { t:0, clouds:[], mountains:[] };
         const data = await response.json();
         leaderboard = data.leaderboard || [];
         updateLeaderboardDisplay();
-        console.log('Score saved to leaderboard');
         session.used = true;
         currentSession = null;
         finalSummary = null;
@@ -535,11 +533,11 @@ var parallax = { t:0, clouds:[], mountains:[] };
         ensureLeaderboardSession();
         return true;
       } else {
-        console.error('Failed to save score to leaderboard');
+        // failure handled by alert below
         return false;
       }
     } catch (error) {
-      console.error('Error saving to leaderboard:', error);
+      // handled via alert below
       alert('Failed to save score. Please try again.');
       return false;
     } finally {
@@ -549,36 +547,26 @@ var parallax = { t:0, clouds:[], mountains:[] };
 
   async function loadLeaderboard() {
     try {
-      console.log('Loading leaderboard...');
       const response = await fetch('/api/leaderboard/redis');
-      console.log('Response status:', response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log('Leaderboard data:', data);
         leaderboard = data.leaderboard || [];
-        console.log('Leaderboard array:', leaderboard);
         updateLeaderboardDisplay();
       } else {
-        console.error('Failed to load leaderboard:', response.status);
+        // ignore, UI will reflect stale data
       }
     } catch (error) {
-      console.error('Error loading leaderboard:', error);
+      // network failure ignored, UI unchanged
     }
   }
 
   function updateLeaderboardDisplay() {
-    console.log('Updating leaderboard display...');
-    console.log('modalLeaderboardList element:', modalLeaderboardList);
-    console.log('leaderboard array length:', leaderboard.length);
-    
     if (!modalLeaderboardList) {
-      console.error('modalLeaderboardList element not found!');
       return;
     }
     
     if (leaderboard.length === 0) {
-      console.log('No scores to display');
       modalLeaderboardList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 20px;">No scores yet!</div>';
       return;
     }
@@ -1146,6 +1134,6 @@ function drawHUD(){
 
   // Init
   resetGame();
-  try { update(); } catch (e) { console.error(e); } // initial render
+  try { update(); } catch (e) {} // initial render
   requestAnimationFrame(loop);
 })();

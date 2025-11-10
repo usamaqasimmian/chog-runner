@@ -42,22 +42,17 @@ export default async function handler(req, res) {
       PX: ttlMs
     });
   } catch (error) {
-    console.error('Failed to create leaderboard session', error);
     if (client) {
       try {
         await client.disconnect();
-      } catch (disconnectErr) {
-        console.error('Error disconnecting from Redis after failure', disconnectErr);
-      }
+      } catch (disconnectErr) {}
     }
     return res.status(500).json({ error: 'Failed to create session' });
   }
 
   try {
     await client.disconnect();
-  } catch (error) {
-    console.error('Error disconnecting Redis after session creation', error);
-  }
+  } catch (error) {}
 
   return res.status(200).json({
     sessionId,
