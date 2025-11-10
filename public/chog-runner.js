@@ -102,6 +102,126 @@ var parallax = { t:0, clouds:[], mountains:[] };
 
   // Make power-up easier to collect: negative pad enlarges coin hitbox
   const POWER_PICK_PAD = -12; // increase magnitude for even easier pickups
+  function createEmptySummary(){
+    return {
+      frames: 0,
+      baseScore: 0,
+      multiplierFrames: 0,
+      multiplierBonus: 0,
+      coinsCollected: 0,
+      powerCoinsCollected: 0,
+      startedAt: null,
+      endedAt: null
+    };
+  }
+
+  function computeScoreFromSummary(stats){
+    return (stats.baseScore || 0) + (stats.multiplierBonus || 0) + (stats.coinsCollected || 0) * 100;
+  }
+
+  function normaliseSummaryForPayload(stats){
+    return {
+      frames: Math.max(0, Math.floor(stats.frames || 0)),
+      baseScore: Math.max(0, Math.floor(stats.baseScore || 0)),
+      multiplierFrames: Math.max(0, Math.floor(stats.multiplierFrames || 0)),
+      multiplierBonus: Math.max(0, Math.floor(stats.multiplierBonus || 0)),
+      coinsCollected: Math.max(0, Math.floor(stats.coinsCollected || 0)),
+      powerCoinsCollected: Math.max(0, Math.floor(stats.powerCoinsCollected || 0))
+    };
+  }
+
+  async function computeRunHash(summary, sessionId){
+    if (!window.crypto || !window.crypto.subtle) return null;
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(`${JSON.stringify(summary)}:${sessionId}`);
+      const digest = await window.crypto.subtle.digest('SHA-256', data);
+      const bytes = Array.from(new Uint8Array(digest));
+      return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (error) {
+      console.warn('Failed to hash run summary', error);
+      return null;
+    }
+  }
+
+  async function requestLeaderboardSession(){
+    const response = await fetch('/api/leaderboard/session', { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(`Session request failed with status ${response.status}`);
+    }
+    const payload = await response.json();
+    currentSession = {
+      id: payload.sessionId,
+      issuedAt: payload.issuedAt || Date.now(),
+      expiresAt: payload.expiresAt || Date.now() + 5 * 60 * 1000,
+      used: false
+    };
+    return currentSession;
+  }
+
+  function ensureLeaderboardSession(){
+    if (currentSession && !currentSession.used) {
+      return Promise.resolve(currentSession);
+    }
+    if (!pendingSessionPromise) {
+      pendingSessionPromise = requestLeaderboardSession()
+        .catch((error) => {
+          console.error('Failed to establish leaderboard session', error);
+          currentSession = null;
+          return null;
+        })
+        .finally(() => {
+          pendingSessionPromise = null;
+        });
+    }
+    return pendingSessionPromise;
+  }
+
+  function applyFrameScore(baseDelta){
+    if (!runSummary || !runSummary.startedAt) return;
+    runSummary.frames += 1;
+    runSummary.baseScore += baseDelta;
+    if (scoreMultiplier > 1){
+      runSummary.multiplierFrames += 1;
+      const bonus = baseDelta * (scoreMultiplier - 1);
+      runSummary.multiplierBonus += bonus;
+    }
+    score = computeScoreFromSummary(runSummary);
+  }
+
+  function recordCoinPickup(){
+    if (!runSummary || !runSummary.startedAt) return;
+    runSummary.coinsCollected += 1;
+    score = computeScoreFromSummary(runSummary);
+  }
+
+  function recordPowerCoinPickup(){
+    if (!runSummary || !runSummary.startedAt) return;
+    runSummary.powerCoinsCollected += 1;
+  }
+
+  function finaliseRunSummary(){
+    if (!runSummary || !runSummary.startedAt || runSummary.endedAt) return;
+    runSummary.endedAt = Date.now();
+    finalSummary = normaliseSummaryForPayload(runSummary);
+  }
+
+  async function ensureRunning(){
+    if (running) return true;
+    if (gameOver) return false;
+    const session = await ensureLeaderboardSession();
+    if (!session) {
+      alert('Unable to start run: leaderboard session unavailable.');
+      return false;
+    }
+    runSummary = createEmptySummary();
+    runSummary.startedAt = Date.now();
+    running = true;
+    hide(startOverlay);
+    hide(gameOverOverlay);
+    return true;
+  }
+
 
   function scheduleNextPower(){
     nextPowerAt = world.t + sec(5) + Math.floor(Math.random()*sec(12));
@@ -125,6 +245,11 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let high = parseInt(localStorage.getItem("chog_highscore") || "0", 10) || 0;
   let leaderboard = [];
   let playerName = "";
+  let currentSession = null;
+  let pendingSessionPromise = null;
+  let runSummary = createEmptySummary();
+  let finalSummary = null;
+  let saveInFlight = false;
 
 
   // Pixel-based gap control
@@ -332,8 +457,23 @@ var parallax = { t:0, clouds:[], mountains:[] };
   function hide(el){ el.style.display = "none"; }
 
   // Leaderboard functions
-  async function saveToLeaderboard(score) {
+  async function saveToLeaderboard(score, summarySnapshot) {
+    if (saveInFlight) return false;
     try {
+      if (!summarySnapshot) {
+        alert('No run summary available to save score.');
+        return false;
+      }
+      const session = currentSession && !currentSession.used ? currentSession : null;
+      if (!session) {
+        alert('Session expired before score could be saved. Please try another run.');
+        return false;
+      }
+
+      saveInFlight = true;
+      const summaryPayload = normaliseSummaryForPayload(summarySnapshot);
+      const hash = await computeRunHash(summaryPayload, session.id);
+
       const response = await fetch('/api/leaderboard/redis', {
         method: 'POST',
         headers: {
@@ -342,7 +482,10 @@ var parallax = { t:0, clouds:[], mountains:[] };
         body: JSON.stringify({
           playerName: playerName || 'Anonymous',
           score: score,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          sessionId: session.id,
+          summary: summaryPayload,
+          hash
         })
       });
       
@@ -351,11 +494,21 @@ var parallax = { t:0, clouds:[], mountains:[] };
         leaderboard = data.leaderboard || [];
         updateLeaderboardDisplay();
         console.log('Score saved to leaderboard');
+        session.used = true;
+        currentSession = null;
+        finalSummary = null;
+        ensureLeaderboardSession();
+        return true;
       } else {
         console.error('Failed to save score to leaderboard');
+        return false;
       }
     } catch (error) {
       console.error('Error saving to leaderboard:', error);
+      alert('Failed to save score. Please try again.');
+      return false;
+    } finally {
+      saveInFlight = false;
     }
   }
 
@@ -429,6 +582,12 @@ var parallax = { t:0, clouds:[], mountains:[] };
     invincibleFor = 0;
     multiplierFor = 0;
     scoreMultiplier = 1;
+    runSummary = createEmptySummary();
+    finalSummary = null;
+    if (currentSession && !currentSession.used) {
+      currentSession = null;
+    }
+    ensureLeaderboardSession();
     
     // Reset UI elements
     playerNameSection.style.display = 'none';
@@ -451,6 +610,16 @@ var parallax = { t:0, clouds:[], mountains:[] };
       chog.vy = stronger ? -15 : -12.5;
       chog.onGround = false;
       world.speedTarget += 0.02;
+    }
+  }
+
+  function performJump(){
+    if (gameOver) return;
+    if (chog.onGround){
+      jump(false);
+    } else if (allowDoubleJump && !usedSecondJump){
+      usedSecondJump = true;
+      chog.vy = -11.5;
     }
   }
 
@@ -478,7 +647,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (!chog.onGround){
       chog.vy += g; chog.y += chog.vy;
       if (chog.y >= world.groundY - chog.h){
-        chog.y = world.groundY - chog.h; chog.vy = 0; chog.onGround = true;
+        chog.y = world.groundY - chog.h; chog.vy = 0; chog.onGround = true; usedSecondJump = false;
       }
     }
     chog.frame += world.speed * 0.2;
@@ -550,6 +719,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
       powerCoin.active = false;
       invincibleFor = sec(5);
       multiplierFor = sec(10);
+      recordPowerCoinPickup();
       scheduleNextPower();
     }
     for (const o of obstacles){
@@ -560,8 +730,8 @@ var parallax = { t:0, clouds:[], mountains:[] };
     }
 
     if (logo.active && collide(getChogHitbox(), {x:logo.x,y:logo.y,w:logo.w,h:logo.h}, 10)){
-      /* existing coin pickup */
-      score += 100; world.speedTarget += 0.6; logo.active = false;
+      recordCoinPickup();
+      world.speedTarget += 0.6; logo.active = false;
       logo.cooldown = 220 - Math.min(120, Math.floor(world.speed * 10));
     }
 
@@ -570,11 +740,15 @@ var parallax = { t:0, clouds:[], mountains:[] };
       powerCoin.active = false;
       invincibleFor = sec(5);          // 5s invincible
       multiplierFor = sec(10);         // 10s x50 score
+      recordPowerCoinPickup();
       scheduleNextPower();
     }
 
 
-    if (running) score += Math.floor(world.speed * 0.2 * scoreMultiplier);
+    if (running){
+      const baseDelta = Math.max(0, Math.floor(world.speed * 0.2));
+      applyFrameScore(baseDelta);
+    }
 
     updateParticles();
     drawFrame();
@@ -733,6 +907,7 @@ function drawHUD(){
     high = Math.max(high, score);
     localStorage.setItem("chog_highscore", String(high));
     scoreLine.textContent = `Score: ${score} · Best: ${high}`;
+    finaliseRunSummary();
     
     // Show player name input
     playerNameSection.style.display = 'block';
@@ -758,10 +933,12 @@ function drawHUD(){
     
     if (isJump){
       e.preventDefault();
-      if (!running && !gameOver){ running = true; hide(startOverlay); }
-      if (!gameOver){
-        if (chog.onGround){ jump(false); }
-        else if (allowDoubleJump && !usedSecondJump){ usedSecondJump = true; chog.vy = -11.5; }
+      if (!running && !gameOver){
+        ensureRunning().then((ok) => {
+          if (ok) performJump();
+        });
+      } else {
+        performJump();
       }
     }
     if (isDuckDown){ chog.duck = chog.onGround; }
@@ -769,10 +946,11 @@ function drawHUD(){
       e.preventDefault();
       if (gameOver){
         // Enter restarts the game when game is over and not typing
-        resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
+        resetGame();
+        ensureRunning();
       } else if (!running && !gameOver){
         // Enter starts the game
-        running = true; hide(startOverlay);
+        ensureRunning();
       }
     }
   }
@@ -786,8 +964,9 @@ function drawHUD(){
   // Canvas touch/click handling
   canvas.addEventListener("pointerdown", () => {
     if (gameOver) return;
-    if (!running){ running = true; hide(startOverlay); }
-    jump();
+    ensureRunning().then((ok) => {
+      if (ok) jump();
+    });
   });
 
   // Mobile-specific canvas touch handling
@@ -795,20 +974,23 @@ function drawHUD(){
     canvas.addEventListener("touchstart", (e) => {
       e.preventDefault();
       if (gameOver) return;
-      if (!running){ running = true; hide(startOverlay); }
-      jump();
+      ensureRunning().then((ok) => {
+        if (ok) jump();
+      });
     }, { passive: false });
   }
   restartBtn.addEventListener("click", () => {
-    resetGame(); running = true; hide(startOverlay); hide(gameOverOverlay);
+    resetGame();
+    ensureRunning();
   });
 
   // Touch Controls for Mobile
   touchJump.addEventListener("touchstart", (e) => {
     e.preventDefault();
     if (gameOver) return;
-    if (!running){ running = true; hide(startOverlay); }
-    jump();
+    ensureRunning().then((ok) => {
+      if (ok) jump();
+    });
   });
 
   touchDuck.addEventListener("touchstart", (e) => {
@@ -841,10 +1023,16 @@ function drawHUD(){
     const name = playerNameInput.value.trim();
     if (name) {
       playerName = name;
-      await saveToLeaderboard(score);
-      playerNameSection.style.display = 'none';
-      saveScoreBtn.textContent = 'Score Saved!';
-      saveScoreBtn.disabled = true;
+      if (!finalSummary) {
+        alert('Run data missing. Please play a new round before saving.');
+        return;
+      }
+      const saved = await saveToLeaderboard(score, finalSummary);
+      if (saved) {
+        playerNameSection.style.display = 'none';
+        saveScoreBtn.textContent = 'Score Saved!';
+        saveScoreBtn.disabled = true;
+      }
     } else {
       alert('Please enter your name!');
     }

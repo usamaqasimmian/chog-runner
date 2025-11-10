@@ -1,4 +1,5 @@
 import { createClient } from 'redis';
+import { parseSessionRecord, verifyScorePayload } from './verifyScore.js';
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
@@ -29,10 +30,18 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const { playerName, score, timestamp } = req.body;
+      const { playerName, score, timestamp, sessionId, summary, hash } = req.body || {};
 
-      if (!playerName || typeof score !== 'number') {
-        return res.status(400).json({ error: 'Missing required fields: playerName and score' });
+      if (!playerName || typeof playerName !== 'string') {
+        return res.status(400).json({ error: 'Missing player name' });
+      }
+
+      if (typeof score !== 'number' || !Number.isFinite(score)) {
+        return res.status(400).json({ error: 'Missing or invalid score' });
+      }
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ error: 'Missing session identifier' });
       }
 
       // Create Redis client
@@ -41,6 +50,41 @@ export default async function handler(req, res) {
       });
 
       await client.connect();
+
+      const sessionKey = `leaderboard:session:${sessionId}`;
+      const rawSession = await client.get(sessionKey);
+      if (!rawSession) {
+        await client.disconnect();
+        return res.status(400).json({ error: 'Session not found or expired' });
+      }
+
+      const session = parseSessionRecord(rawSession);
+
+      if (session.used) {
+        await client.disconnect();
+        return res.status(409).json({ error: 'Session already used' });
+      }
+
+      const now = Date.now();
+
+      let verificationResult;
+      try {
+        verificationResult = verifyScorePayload({
+          reportedScore: score,
+          rawSummary: summary,
+          sessionRecord: session,
+          now
+        });
+      } catch (validationError) {
+        console.warn('Score verification failed', validationError);
+        await client.disconnect();
+        return res.status(400).json({ error: validationError.message || 'Invalid run submission' });
+      }
+
+      if (hash && typeof hash === 'string') {
+        // Retain hash for log correlation
+        console.log(`Leaderboard submission hash=${hash} session=${sessionId}`);
+      }
 
       // Get existing leaderboard
       const leaderboardData = await client.get('leaderboard');
@@ -51,7 +95,8 @@ export default async function handler(req, res) {
         playerName: playerName.trim(),
         score,
         timestamp: timestamp || Date.now(),
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        summary: verificationResult.summary
       };
 
       leaderboard.push(leaderboardEntry);
@@ -61,11 +106,14 @@ export default async function handler(req, res) {
 
       // Save back to Redis
       await client.set('leaderboard', JSON.stringify(leaderboard));
+      await client.set(sessionKey, JSON.stringify({ ...session, used: true, usedAt: now }), {
+        PX: 60 * 1000
+      });
 
       await client.disconnect();
 
-      res.status(200).json({ 
-        success: true, 
+      res.status(200).json({
+        success: true,
         leaderboard
       });
     } catch (error) {
@@ -77,3 +125,4 @@ export default async function handler(req, res) {
 
   res.status(405).json({ error: 'Method not allowed' });
 }
+
