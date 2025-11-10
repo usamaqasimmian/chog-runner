@@ -102,6 +102,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
 
   // Make power-up easier to collect: negative pad enlarges coin hitbox
   const POWER_PICK_PAD = -12; // increase magnitude for even easier pickups
+  const OBSTACLE_COLLISION_PAD = 6;
   function createEmptySummary(){
     return {
       frames: 0,
@@ -723,7 +724,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
       scheduleNextPower();
     }
     for (const o of obstacles){
-      if (collide(getChogHitbox(), o, 0) && invincibleFor <= 0){
+      if (collide(getChogHitbox(), o, OBSTACLE_COLLISION_PAD) && invincibleFor <= 0){
         endGame(); updateParticles();
     drawFrame(); return;
       }
