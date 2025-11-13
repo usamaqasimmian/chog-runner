@@ -70,6 +70,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
   const touchDuck = document.getElementById("touchDuck");
 
   // World state
+  const MAX_WORLD_SPEED = 22;
   const world = { w: BASE_W, h: BASE_H, groundY: 210, speed: 6, speedTarget: 6, t: 0 };
   const chog = { x: 80, y: 0, w: 46, h: 44, vy: 0, onGround: true, duck: false, frame: 0 };
   const logo = { x: 360, y: 140, w: 34, h: 34, vx: 0, active: true, cooldown: 0 };
@@ -638,6 +639,9 @@ var parallax = { t:0, clouds:[], mountains:[] };
       chog.vy = stronger ? -15 : -12.5;
       chog.onGround = false;
       world.speedTarget += 0.02;
+      if (world.speedTarget > MAX_WORLD_SPEED) {
+        world.speedTarget = MAX_WORLD_SPEED;
+      }
     }
   }
 
@@ -656,8 +660,14 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (gameOver){ updateParticles();
     drawFrame(); return; }
 
-    // Ease speed
+    // Ease speed with clamp
+    if (world.speedTarget > MAX_WORLD_SPEED) {
+      world.speedTarget = MAX_WORLD_SPEED;
+    }
     world.speed += (world.speedTarget - world.speed) * 0.02;
+    if (world.speed > MAX_WORLD_SPEED) {
+      world.speed = MAX_WORLD_SPEED;
+    }
 
     // Background
     ctx.clearRect(0,0,world.w,world.h);
@@ -759,7 +769,11 @@ var parallax = { t:0, clouds:[], mountains:[] };
 
     if (logo.active && collide(getChogHitbox(), {x:logo.x,y:logo.y,w:logo.w,h:logo.h}, 10)){
       recordCoinPickup();
-      world.speedTarget += 0.6; logo.active = false;
+      world.speedTarget += 0.6;
+      if (world.speedTarget > MAX_WORLD_SPEED) {
+        world.speedTarget = MAX_WORLD_SPEED;
+      }
+      logo.active = false;
       logo.cooldown = 220 - Math.min(120, Math.floor(world.speed * 10));
     }
 
