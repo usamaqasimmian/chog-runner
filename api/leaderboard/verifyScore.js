@@ -13,8 +13,11 @@ const MAX_START_DRIFT_MS = 2_000;
 const MAX_END_DRIFT_MS = 2_000;
 const MAX_DURATION_OVERRUN_MS = 2_000;
 const MAX_FRAME_DURATION_DRIFT_MS = 1_500;
+const MAX_IDLE_TIMEOUTS = 1;
+const MAX_PAUSED_MS = 3_000;
+const VALID_END_REASONS = new Set(['collision', 'idle', 'visibility']);
 
-const REQUIRED_FIELDS = [
+const REQUIRED_NUMERIC_FIELDS = [
   'frames',
   'baseScore',
   'multiplierFrames',
@@ -22,7 +25,9 @@ const REQUIRED_FIELDS = [
   'coinsCollected',
   'powerCoinsCollected',
   'startedAt',
-  'endedAt'
+  'endedAt',
+  'pausedMs',
+  'idleTimeouts'
 ];
 
 function ensureNumber(value, label) {
@@ -40,6 +45,56 @@ function ensureNumber(value, label) {
   throw new Error(`Invalid ${label}`);
 }
 
+function toInt(value, label, defaultValue = 0) {
+  const num = ensureNumber(value === undefined ? defaultValue : value, label);
+  if (!Number.isFinite(num)) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return Math.max(0, Math.floor(num));
+}
+
+function sanitisePowerDetail(rawDetail, index) {
+  if (!rawDetail || typeof rawDetail !== 'object') {
+    throw new Error(`Invalid power detail entry at index ${index}`);
+  }
+
+  const type = Math.max(0, Math.min(2, toInt(rawDetail.type, `power detail ${index} type`, 0)));
+  const collectedAt = toInt(
+    rawDetail.collectedAt,
+    `power detail ${index} collectedAt`,
+    rawDetail.startFrame ?? 0
+  );
+  const startFrame = toInt(
+    rawDetail.startFrame,
+    `power detail ${index} startFrame`,
+    collectedAt
+  );
+  const endFrame = toInt(
+    rawDetail.endFrame,
+    `power detail ${index} endFrame`,
+    startFrame
+  );
+  const multiplierFrames = toInt(
+    rawDetail.multiplierFrames,
+    `power detail ${index} multiplierFrames`,
+    0
+  );
+  const invFrames = toInt(
+    rawDetail.invFrames,
+    `power detail ${index} invFrames`,
+    0
+  );
+
+  return {
+    type,
+    collectedAt,
+    startFrame,
+    endFrame,
+    multiplierFrames,
+    invFrames
+  };
+}
+
 function sanitiseSummary(rawSummary) {
   if (!rawSummary || typeof rawSummary !== 'object') {
     throw new Error('Missing run summary');
@@ -47,7 +102,7 @@ function sanitiseSummary(rawSummary) {
 
   const summary = {};
 
-  for (const field of REQUIRED_FIELDS) {
+  for (const field of REQUIRED_NUMERIC_FIELDS) {
     if (!(field in rawSummary)) {
       throw new Error(`Missing summary field ${field}`);
     }
@@ -63,6 +118,12 @@ function sanitiseSummary(rawSummary) {
       summary[key] = Math.floor(summary[key]);
     }
   }
+
+  const endReasonRaw = typeof rawSummary.endReason === 'string' ? rawSummary.endReason.trim().toLowerCase() : '';
+  summary.endReason = endReasonRaw || 'collision';
+
+  const powerDetailsRaw = Array.isArray(rawSummary.powerDetails) ? rawSummary.powerDetails : [];
+  summary.powerDetails = powerDetailsRaw.map((detail, index) => sanitisePowerDetail(detail, index));
 
   return summary;
 }
@@ -110,12 +171,24 @@ function verifyTiming(summary, sessionRecord, now) {
     throw new Error('Run duration exceeded session allowance');
   }
 
+  if (summary.pausedMs > durationMs) {
+    throw new Error('Paused duration exceeds run duration');
+  }
+
+  if (summary.pausedMs > MAX_PAUSED_MS) {
+    throw new Error('Paused duration too long');
+  }
+
+  const activeDurationMs = durationMs - summary.pausedMs;
   const expectedDurationMs = summary.frames * (1000 / GAME_FPS);
-  if (Math.abs(durationMs - expectedDurationMs) > MAX_FRAME_DURATION_DRIFT_MS + (summary.frames * 4)) {
+  if (Math.abs(activeDurationMs - expectedDurationMs) > MAX_FRAME_DURATION_DRIFT_MS + (summary.frames * 4)) {
     throw new Error('Run duration inconsistent with reported frames');
   }
 
-  return durationMs;
+  return {
+    durationMs,
+    activeDurationMs
+  };
 }
 
 function estimatePowerCoinSpawns(seed, totalFrames) {
@@ -130,6 +203,57 @@ function estimatePowerCoinSpawns(seed, totalFrames) {
     next += sec(5) + Math.floor(rng() * sec(12));
   }
   return count;
+}
+
+function validatePowerDetails(summary, spawnCount) {
+  const details = summary.powerDetails || [];
+  if (details.length !== summary.powerCoinsCollected) {
+    throw new Error('Power detail count mismatch');
+  }
+
+  let lastCollected = -1;
+  let totalMultiplier = 0;
+  let totalInv = 0;
+
+  for (let i = 0; i < details.length; i += 1) {
+    const detail = details[i];
+    if (detail.collectedAt < lastCollected) {
+      throw new Error('Power details not chronological');
+    }
+    lastCollected = detail.collectedAt;
+
+    if (detail.startFrame > detail.endFrame) {
+      throw new Error('Power detail timeframe invalid');
+    }
+    if (detail.endFrame > summary.frames || detail.startFrame > summary.frames) {
+      throw new Error('Power detail exceeds run duration');
+    }
+    if (detail.collectedAt > summary.frames) {
+      throw new Error('Power detail collected out of range');
+    }
+
+    totalMultiplier += detail.multiplierFrames;
+    totalInv += detail.invFrames;
+
+    if (detail.type === 0 && detail.multiplierFrames === 0) {
+      throw new Error('Multiplier power-up missing multiplier frames');
+    }
+    if (detail.invFrames === 0) {
+      throw new Error('Power-up invincibility frames missing');
+    }
+  }
+
+  if (totalMultiplier !== summary.multiplierFrames) {
+    throw new Error('Multiplier frames mismatch');
+  }
+
+  if (totalInv > summary.frames) {
+    throw new Error('Invincibility frames unrealistic');
+  }
+
+  if (spawnCount !== null && details.length > spawnCount) {
+    throw new Error('Power coin pickups exceed scheduled spawns');
+  }
 }
 
 export function verifyScorePayload({ reportedScore, rawSummary, sessionRecord, now = Date.now() }) {
@@ -175,7 +299,7 @@ export function verifyScorePayload({ reportedScore, rawSummary, sessionRecord, n
     throw new Error('Base score exceeds per-frame limit');
   }
 
-  verifyTiming(summary, sessionRecord, now);
+  const timing = verifyTiming(summary, sessionRecord, now);
 
   if (summary.multiplierFrames > summary.frames) {
     throw new Error('Multiplier frames exceed total frames');
@@ -194,16 +318,39 @@ export function verifyScorePayload({ reportedScore, rawSummary, sessionRecord, n
     throw new Error('Power coin count inconsistent with other metrics');
   }
 
+  if (!VALID_END_REASONS.has(summary.endReason)) {
+    throw new Error('Invalid end reason');
+  }
+
+  if (summary.idleTimeouts > MAX_IDLE_TIMEOUTS) {
+    throw new Error('Idle timeout count exceeded');
+  }
+
+  if (summary.endReason === 'idle' && summary.idleTimeouts === 0) {
+    throw new Error('Idle reason inconsistent with counters');
+  }
+
+  if (summary.endReason !== 'idle' && summary.idleTimeouts > 0) {
+    throw new Error('Idle timeout inconsistent with end reason');
+  }
+
   const seed = sessionRecord.powerSeed;
+  let spawnCount = null;
   if (Number.isFinite(seed)) {
-    const spawnCount = estimatePowerCoinSpawns(seed, summary.frames);
+    spawnCount = estimatePowerCoinSpawns(seed, summary.frames);
     if (spawnCount !== null && summary.powerCoinsCollected > spawnCount) {
       throw new Error('Power coin pickups exceed scheduled spawns');
     }
   }
 
+  validatePowerDetails(summary, spawnCount);
+
   return {
-    summary,
+    summary: {
+      ...summary,
+      durationMs: timing.durationMs,
+      activeDurationMs: timing.activeDurationMs
+    },
     expectedScore
   };
 }

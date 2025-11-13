@@ -1,4 +1,5 @@
 import { createClient } from 'redis';
+import crypto from 'crypto';
 import { parseSessionRecord, verifyScorePayload } from './verifyScore.js';
 
 export default async function handler(req, res) {
@@ -29,7 +30,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const { playerName, score, timestamp, sessionId, summary } = req.body || {};
+      const { playerName, score, timestamp, sessionId, summary, fingerprint } = req.body || {};
 
       if (!playerName || typeof playerName !== 'string') {
         return res.status(400).json({ error: 'Missing player name' });
@@ -50,6 +51,43 @@ export default async function handler(req, res) {
 
       await client.connect();
 
+      const fingerprintInput = typeof fingerprint === 'string' ? fingerprint.slice(0, 1024) : '';
+      const fingerprintHash = fingerprintInput
+        ? crypto.createHash('sha256').update(fingerprintInput, 'utf8').digest('hex')
+        : null;
+
+      const forwarded = req.headers['x-forwarded-for'];
+      const forwardedIp = Array.isArray(forwarded) ? forwarded[0] : (forwarded || '');
+      const directIp = typeof forwardedIp === 'string' && forwardedIp.length > 0
+        ? forwardedIp.split(',')[0].trim()
+        : (req.headers['x-real-ip'] || req.socket?.remoteAddress || '');
+      const ip = typeof directIp === 'string' ? directIp : '';
+      const ipHash = ip ? crypto.createHash('sha256').update(ip, 'utf8').digest('hex') : null;
+
+      if (ipHash) {
+        const rateKey = `leaderboard:rate:ip:${ipHash}`;
+        const attemptCount = await client.incr(rateKey);
+        if (attemptCount === 1) {
+          await client.pexpire(rateKey, 60 * 1000);
+        }
+        if (attemptCount > 5) {
+          await client.disconnect();
+          return res.status(429).json({ error: 'Too many submissions' });
+        }
+      }
+
+      if (fingerprintHash) {
+        const fpRateKey = `leaderboard:rate:f:${fingerprintHash}`;
+        const fpAttemptCount = await client.incr(fpRateKey);
+        if (fpAttemptCount === 1) {
+          await client.pexpire(fpRateKey, 60 * 1000);
+        }
+        if (fpAttemptCount > 5) {
+          await client.disconnect();
+          return res.status(429).json({ error: 'Too many submissions' });
+        }
+      }
+
       const sessionKey = `leaderboard:session:${sessionId}`;
       const rawSession = await client.get(sessionKey);
       if (!rawSession) {
@@ -62,6 +100,20 @@ export default async function handler(req, res) {
       if (session.used) {
         await client.disconnect();
         return res.status(409).json({ error: 'Session already used' });
+      }
+
+      if (session.fingerprintHash) {
+        if (!fingerprintHash || session.fingerprintHash !== fingerprintHash) {
+          await client.disconnect();
+          return res.status(403).json({ error: 'Session fingerprint mismatch' });
+        }
+      }
+
+      if (session.ipHash) {
+        if (!ipHash || session.ipHash !== ipHash) {
+          await client.disconnect();
+          return res.status(403).json({ error: 'Session context mismatch' });
+        }
       }
 
       const now = Date.now();

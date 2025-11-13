@@ -104,6 +104,13 @@ var parallax = { t:0, clouds:[], mountains:[] };
   // Make power-up easier to collect: negative pad enlarges coin hitbox
   const POWER_PICK_PAD = -12; // increase magnitude for even easier pickups
   const OBSTACLE_COLLISION_PAD = 6;
+  const IDLE_TIMEOUT_MS = 15000;
+  const VISIBILITY_GRACE_MS = 1000;
+  const END_REASON_LABELS = {
+    collision: 'Obstacle hit',
+    idle: 'Idle timeout',
+    visibility: 'Focus lost'
+  };
   function createEmptySummary(){
     return {
       frames: 0,
@@ -113,7 +120,11 @@ var parallax = { t:0, clouds:[], mountains:[] };
       coinsCollected: 0,
       powerCoinsCollected: 0,
       startedAt: null,
-      endedAt: null
+      endedAt: null,
+      powerDetails: [],
+      pausedMs: 0,
+      idleTimeouts: 0,
+      endReason: ""
     };
   }
 
@@ -132,6 +143,29 @@ var parallax = { t:0, clouds:[], mountains:[] };
     return Math.random();
   }
 
+  function computeClientFingerprint(){
+    const nav = window.navigator || {};
+    const scr = window.screen || {};
+    const tz = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      } catch (_err) {
+        return '';
+      }
+    })();
+    return [
+      nav.userAgent || '',
+      nav.language || '',
+      nav.platform || '',
+      scr.width || 0,
+      scr.height || 0,
+      scr.colorDepth || 0,
+      Math.round((window.devicePixelRatio || 1) * 1000) / 1000,
+      tz,
+      (nav.hardwareConcurrency || 0)
+    ].join('|');
+  }
+
   function computeScoreFromSummary(stats){
     return (stats.baseScore || 0) + (stats.multiplierBonus || 0) + (stats.coinsCollected || 0) * 100;
   }
@@ -140,6 +174,16 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (!stats || !stats.startedAt || !stats.endedAt){
       throw new Error('Run timing data missing');
     }
+    const normalizedDetails = Array.isArray(stats.powerDetails) ? stats.powerDetails.map((detail) => {
+      return {
+        type: Math.max(0, Math.floor(detail.type || 0)),
+        multiplierFrames: Math.max(0, Math.floor(detail.multiplierFrames || 0)),
+        invFrames: Math.max(0, Math.floor(detail.invFrames || 0)),
+        startFrame: Math.max(0, Math.floor(detail.startFrame || 0)),
+        endFrame: Math.max(0, Math.floor(detail.endFrame || detail.startFrame || 0)),
+        collectedAt: Math.max(0, Math.floor(detail.collectedAt || detail.startFrame || 0))
+      };
+    }) : [];
     return {
       frames: Math.max(0, Math.floor(stats.frames || 0)),
       baseScore: Math.max(0, Math.floor(stats.baseScore || 0)),
@@ -148,7 +192,11 @@ var parallax = { t:0, clouds:[], mountains:[] };
       coinsCollected: Math.max(0, Math.floor(stats.coinsCollected || 0)),
       powerCoinsCollected: Math.max(0, Math.floor(stats.powerCoinsCollected || 0)),
       startedAt: Math.max(0, Math.floor(stats.startedAt || 0)),
-      endedAt: Math.max(0, Math.floor(stats.endedAt || 0))
+      endedAt: Math.max(0, Math.floor(stats.endedAt || 0)),
+      pausedMs: Math.max(0, Math.floor(stats.pausedMs || 0)),
+      idleTimeouts: Math.max(0, Math.floor(stats.idleTimeouts || 0)),
+      endReason: typeof stats.endReason === 'string' ? stats.endReason.slice(0, 32) : '',
+      powerDetails: normalizedDetails
     };
   }
 
@@ -166,7 +214,16 @@ var parallax = { t:0, clouds:[], mountains:[] };
   }
 
   async function requestLeaderboardSession(){
-    const response = await fetch('/api/leaderboard/session', { method: 'POST' });
+    const response = await fetch('/api/leaderboard/session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        fingerprint: CLIENT_FINGERPRINT,
+        timezoneOffset: new Date().getTimezoneOffset()
+      })
+    });
     if (!response.ok) {
       throw new Error(`Session request failed with status ${response.status}`);
     }
@@ -176,7 +233,9 @@ var parallax = { t:0, clouds:[], mountains:[] };
       issuedAt: payload.issuedAt || Date.now(),
       expiresAt: payload.expiresAt || Date.now() + 5 * 60 * 1000,
       used: false,
-      powerSeed: typeof payload.powerSeed === 'number' ? payload.powerSeed : null
+      powerSeed: typeof payload.powerSeed === 'number' ? payload.powerSeed : null,
+      fingerprintHash: payload.fingerprintHash || null,
+      ipHash: payload.ipHash || null
     };
     powerRng = currentSession.powerSeed !== null ? createMulberry32(currentSession.powerSeed) : null;
     if (!running) {
@@ -203,6 +262,10 @@ var parallax = { t:0, clouds:[], mountains:[] };
     return pendingSessionPromise;
   }
 
+  function registerPlayerInput(){
+    lastInputAt = Date.now();
+  }
+
   function applyFrameScore(baseDelta){
     if (!runSummary || !runSummary.startedAt) return;
     runSummary.frames += 1;
@@ -211,6 +274,10 @@ var parallax = { t:0, clouds:[], mountains:[] };
       runSummary.multiplierFrames += 1;
       const bonus = baseDelta * (scoreMultiplier - 1);
       runSummary.multiplierBonus += bonus;
+    }
+    if (currentPowerDetail){
+      if (invincibleFor > 0) currentPowerDetail.invFrames += 1;
+      if (multiplierFor > 0) currentPowerDetail.multiplierFrames += 1;
     }
     score = computeScoreFromSummary(runSummary);
   }
@@ -224,11 +291,35 @@ var parallax = { t:0, clouds:[], mountains:[] };
   function recordPowerCoinPickup(){
     if (!runSummary || !runSummary.startedAt) return;
     runSummary.powerCoinsCollected += 1;
+    if (currentPowerDetail && !currentPowerDetail.endFrame) {
+      currentPowerDetail.endFrame = world.t;
+      runSummary.powerDetails.push(currentPowerDetail);
+    }
+    currentPowerDetail = {
+      type: powerCoin.type ?? 0,
+      collectedAt: world.t,
+      startFrame: world.t,
+      multiplierFrames: 0,
+      invFrames: 0,
+      endFrame: null
+    };
+    if (currentPowerDetail.type === 2) {
+      allowDoubleJump = true;
+      usedSecondJump = false;
+    }
   }
 
   function finaliseRunSummary(){
     if (!runSummary || !runSummary.startedAt || runSummary.endedAt) return;
     runSummary.endedAt = Date.now();
+     runSummary.pausedMs = totalPausedMs;
+     if (currentPowerDetail && !currentPowerDetail.endFrame) {
+       currentPowerDetail.endFrame = world.t;
+       runSummary.powerDetails.push(currentPowerDetail);
+       currentPowerDetail = null;
+     }
+     allowDoubleJump = false;
+     usedSecondJump = false;
     finalSummary = normaliseSummaryForPayload(runSummary);
   }
 
@@ -242,6 +333,16 @@ var parallax = { t:0, clouds:[], mountains:[] };
     }
     runSummary = createEmptySummary();
     runSummary.startedAt = Date.now();
+    runSummary.pausedMs = 0;
+    runSummary.idleTimeouts = 0;
+    runSummary.endReason = "";
+    lastInputAt = Date.now();
+    visibilityPaused = false;
+    visibilityPauseStarted = 0;
+    totalPausedMs = 0;
+    currentPowerDetail = null;
+    allowDoubleJump = false;
+    usedSecondJump = false;
     if (powerRng){
       scheduleNextPower(true);
     }
@@ -284,6 +385,12 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let finalSummary = null;
   let saveInFlight = false;
   let powerRng = null;
+  let lastInputAt = 0;
+  let visibilityPaused = false;
+  let visibilityPauseStarted = 0;
+  let totalPausedMs = 0;
+  let currentPowerDetail = null;
+  const CLIENT_FINGERPRINT = computeClientFingerprint();
 
 
   // Pixel-based gap control
@@ -518,6 +625,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
           score: score,
           timestamp: Date.now(),
           sessionId: session.id,
+          fingerprint: CLIENT_FINGERPRINT,
           summary: summaryPayload,
           hash
         })
@@ -612,10 +720,17 @@ var parallax = { t:0, clouds:[], mountains:[] };
     scoreMultiplier = 1;
     runSummary = createEmptySummary();
     finalSummary = null;
+    allowDoubleJump = false;
+    usedSecondJump = false;
     if (currentSession && !currentSession.used) {
       currentSession = null;
     }
     powerRng = null;
+    lastInputAt = Date.now();
+    visibilityPaused = false;
+    visibilityPauseStarted = 0;
+    totalPausedMs = 0;
+    currentPowerDetail = null;
     ensureLeaderboardSession();
     
     // Reset UI elements
@@ -647,6 +762,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
 
   function performJump(){
     if (gameOver) return;
+    registerPlayerInput();
     if (chog.onGround){
       jump(false);
     } else if (allowDoubleJump && !usedSecondJump){
@@ -656,9 +772,30 @@ var parallax = { t:0, clouds:[], mountains:[] };
   }
 
   function update(){
+    const now = Date.now();
+
     // Freeze world when game over, still allow a static draw to keep overlays correct.
     if (gameOver){ updateParticles();
     drawFrame(); return; }
+
+    if (visibilityPaused){
+      if (running && visibilityPauseStarted && now - visibilityPauseStarted > VISIBILITY_GRACE_MS){
+        endGame('visibility');
+      }
+      updateParticles();
+      drawFrame();
+      return;
+    }
+
+    if (running && now - lastInputAt > IDLE_TIMEOUT_MS){
+      if (runSummary){
+        runSummary.idleTimeouts = (runSummary.idleTimeouts || 0) + 1;
+      }
+      endGame('idle');
+      updateParticles();
+      drawFrame();
+      return;
+    }
 
     // Ease speed with clamp
     if (world.speedTarget > MAX_WORLD_SPEED) {
@@ -750,6 +887,13 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (invincibleFor > 0) invincibleFor--;
     if (multiplierFor > 0) multiplierFor--;
     scoreMultiplier = (multiplierFor > 0) ? 50 : 1;
+    if (currentPowerDetail && invincibleFor <= 0 && multiplierFor <= 0) {
+      currentPowerDetail.endFrame = world.t;
+      runSummary.powerDetails.push(currentPowerDetail);
+      currentPowerDetail = null;
+      allowDoubleJump = false;
+      usedSecondJump = false;
+    }
 
     // Collisions
     // Power coin pickup (pre-obstacle)
@@ -762,7 +906,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
     }
     for (const o of obstacles){
       if (collide(getChogHitbox(), o, OBSTACLE_COLLISION_PAD) && invincibleFor <= 0){
-        endGame(); updateParticles();
+        endGame('collision'); updateParticles();
     drawFrame(); return;
       }
     }
@@ -944,18 +1088,32 @@ function drawHUD(){
   ctx.restore();
 }
 
-  function endGame(){
-    gameOver = true; running = false;
+  function endGame(reason = 'collision'){
+    if (gameOver) return;
+    if (visibilityPaused && visibilityPauseStarted){
+      totalPausedMs += Math.max(0, Date.now() - visibilityPauseStarted);
+    }
+    gameOver = true;
+    running = false;
+    visibilityPaused = false;
+    visibilityPauseStarted = 0;
     high = Math.max(high, score);
     localStorage.setItem("chog_highscore", String(high));
-    scoreLine.textContent = `Score: ${score} · Best: ${high}`;
+    const reasonLabel = reason ? (END_REASON_LABELS[reason] || reason) : '';
+    const reasonSuffix = reasonLabel ? ` · ${reasonLabel}` : '';
+    scoreLine.textContent = `Score: ${score} · Best: ${high}${reasonSuffix}`;
+    if (runSummary) {
+      runSummary.endReason = reason;
+      runSummary.pausedMs = totalPausedMs;
+    }
     finaliseRunSummary();
     
     // Show player name input
     playerNameSection.style.display = 'block';
     updateLeaderboardDisplay();
     
-    hide(startOverlay); show(gameOverOverlay);
+    hide(startOverlay);
+    show(gameOverOverlay);
   }
 
   // Main loop (always schedules next frame)
@@ -972,6 +1130,10 @@ function drawHUD(){
     
     // Check if user is typing in the name input field
     const isTypingName = document.activeElement === playerNameInput;
+
+    if (!isTypingName && (isJump || isDuckDown || isEnter)) {
+      registerPlayerInput();
+    }
     
     if (isJump){
       e.preventDefault();
@@ -998,14 +1160,37 @@ function drawHUD(){
   }
   function keyup(e){
     const isDuckDown = (e.code === "ArrowDown" || e.key === "ArrowDown");
-    if (isDuckDown){ chog.duck = false; }
+    if (isDuckDown){
+      chog.duck = false;
+      registerPlayerInput();
+    }
   }
   document.addEventListener("keydown", keydown);
   document.addEventListener("keyup", keyup);
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (running && !gameOver) {
+        visibilityPaused = true;
+        visibilityPauseStarted = Date.now();
+      }
+    } else {
+      if (visibilityPaused) {
+        const resumedAt = Date.now();
+        if (visibilityPauseStarted) {
+          totalPausedMs += Math.max(0, resumedAt - visibilityPauseStarted);
+        }
+        visibilityPaused = false;
+        visibilityPauseStarted = 0;
+        registerPlayerInput();
+      }
+    }
+  });
+
   // Canvas touch/click handling
   canvas.addEventListener("pointerdown", () => {
     if (gameOver) return;
+    registerPlayerInput();
     ensureRunning().then((ok) => {
       if (ok) jump();
     });
@@ -1016,12 +1201,14 @@ function drawHUD(){
     canvas.addEventListener("touchstart", (e) => {
       e.preventDefault();
       if (gameOver) return;
+      registerPlayerInput();
       ensureRunning().then((ok) => {
         if (ok) jump();
       });
     }, { passive: false });
   }
   restartBtn.addEventListener("click", () => {
+    registerPlayerInput();
     resetGame();
     ensureRunning();
   });
@@ -1030,6 +1217,7 @@ function drawHUD(){
   touchJump.addEventListener("touchstart", (e) => {
     e.preventDefault();
     if (gameOver) return;
+    registerPlayerInput();
     ensureRunning().then((ok) => {
       if (ok) jump();
     });
@@ -1038,12 +1226,14 @@ function drawHUD(){
   touchDuck.addEventListener("touchstart", (e) => {
     e.preventDefault();
     if (!gameOver) {
+      registerPlayerInput();
       chog.duck = chog.onGround;
     }
   });
 
   touchDuck.addEventListener("touchend", (e) => {
     e.preventDefault();
+    registerPlayerInput();
     chog.duck = false;
   });
 
@@ -1071,9 +1261,9 @@ function drawHUD(){
       }
       const saved = await saveToLeaderboard(score, finalSummary);
       if (saved) {
-        playerNameSection.style.display = 'none';
-        saveScoreBtn.textContent = 'Score Saved!';
-        saveScoreBtn.disabled = true;
+      playerNameSection.style.display = 'none';
+      saveScoreBtn.textContent = 'Score Saved!';
+      saveScoreBtn.disabled = true;
       }
     } else {
       alert('Please enter your name!');

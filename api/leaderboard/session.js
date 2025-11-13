@@ -20,6 +20,30 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Leaderboard storage not configured' });
   }
 
+  let body = {};
+  try {
+    if (typeof req.body === 'string') {
+      body = req.body ? JSON.parse(req.body) : {};
+    } else if (req.body && typeof req.body === 'object') {
+      body = req.body;
+    }
+  } catch (error) {
+    return res.status(400).json({ error: 'Invalid request body' });
+  }
+
+  const fingerprintInput = typeof body.fingerprint === 'string' ? body.fingerprint.slice(0, 1024) : '';
+  const fingerprintHash = fingerprintInput
+    ? crypto.createHash('sha256').update(fingerprintInput, 'utf8').digest('hex')
+    : null;
+
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded) ? forwarded[0] : (forwarded || '');
+  const directIp = typeof forwardedIp === 'string' && forwardedIp.length > 0
+    ? forwardedIp.split(',')[0].trim()
+    : (req.headers['x-real-ip'] || req.socket?.remoteAddress || '');
+  const ip = typeof directIp === 'string' ? directIp : '';
+  const ipHash = ip ? crypto.createHash('sha256').update(ip, 'utf8').digest('hex') : null;
+
   const ttlMs = getSessionTtlMs();
   const issuedAt = Date.now();
   const expiresAt = issuedAt + ttlMs;
@@ -30,13 +54,39 @@ export default async function handler(req, res) {
     issuedAt,
     expiresAt,
     used: false,
-    powerSeed
+    powerSeed,
+    fingerprintHash,
+    ipHash
   };
 
   let client;
   try {
     client = createClient({ url: process.env.REDIS_URL });
     await client.connect();
+
+    if (fingerprintHash) {
+      const fpRateKey = `leaderboard:sessionrate:f:${fingerprintHash}`;
+      const fpRateCount = await client.incr(fpRateKey);
+      if (fpRateCount === 1) {
+        await client.pexpire(fpRateKey, 60 * 1000);
+      }
+      if (fpRateCount > 6) {
+        await client.disconnect();
+        return res.status(429).json({ error: 'Too many session requests' });
+      }
+    }
+
+    if (ipHash) {
+      const ipRateKey = `leaderboard:sessionrate:ip:${ipHash}`;
+      const ipRateCount = await client.incr(ipRateKey);
+      if (ipRateCount === 1) {
+        await client.pexpire(ipRateKey, 60 * 1000);
+      }
+      if (ipRateCount > 12) {
+        await client.disconnect();
+        return res.status(429).json({ error: 'Too many session requests' });
+      }
+    }
 
     await client.set(`leaderboard:session:${sessionId}`, JSON.stringify(sessionRecord), {
       PX: ttlMs
@@ -58,7 +108,9 @@ export default async function handler(req, res) {
     sessionId,
     issuedAt,
     expiresAt,
-    powerSeed
+    powerSeed,
+    fingerprintHash,
+    ipHash
   });
 }
 
