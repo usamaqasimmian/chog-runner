@@ -70,7 +70,7 @@ export default async function handler(req, res) {
       if (fpRateCount === 1) {
         await client.pexpire(fpRateKey, 60 * 1000);
       }
-      if (fpRateCount > 6) {
+      if (fpRateCount > 20) {
         await client.disconnect();
         return res.status(429).json({ error: 'Too many session requests' });
       }
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
       if (ipRateCount === 1) {
         await client.pexpire(ipRateKey, 60 * 1000);
       }
-      if (ipRateCount > 12) {
+      if (ipRateCount > 40) {
         await client.disconnect();
         return res.status(429).json({ error: 'Too many session requests' });
       }

@@ -224,10 +224,27 @@ var parallax = { t:0, clouds:[], mountains:[] };
         timezoneOffset: new Date().getTimezoneOffset()
       })
     });
+    const raw = await response.text();
+    let payload = {};
     if (!response.ok) {
-      throw new Error(`Session request failed with status ${response.status}`);
+      let message = `Session request failed (${response.status})`;
+      try {
+        const data = raw ? JSON.parse(raw) : null;
+        if (data && typeof data.error === 'string' && data.error.trim().length > 0) {
+          message = data.error;
+        }
+      } catch (_err) {
+        // ignore parse failure
+      }
+      throw new Error(message);
     }
-    const payload = await response.json();
+    if (raw) {
+      try {
+        payload = JSON.parse(raw);
+      } catch (error) {
+        throw new Error('Invalid session response');
+      }
+    }
     currentSession = {
       id: payload.sessionId,
       issuedAt: payload.issuedAt || Date.now(),
@@ -237,6 +254,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
       fingerprintHash: payload.fingerprintHash || null,
       ipHash: payload.ipHash || null
     };
+    lastSessionError = null;
     powerRng = currentSession.powerSeed !== null ? createMulberry32(currentSession.powerSeed) : null;
     if (!running) {
       scheduleNextPower(true);
@@ -245,13 +263,16 @@ var parallax = { t:0, clouds:[], mountains:[] };
   }
 
   function ensureLeaderboardSession(){
+    if (!pendingSessionPromise) {
+      lastSessionError = null;
+    }
     if (currentSession && !currentSession.used) {
       return Promise.resolve(currentSession);
     }
     if (!pendingSessionPromise) {
       pendingSessionPromise = requestLeaderboardSession()
         .catch((error) => {
-          // swallow
+          lastSessionError = error instanceof Error ? error : new Error('leaderboard session unavailable.');
           currentSession = null;
           return null;
         })
@@ -328,7 +349,10 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (gameOver) return false;
     const session = await ensureLeaderboardSession();
     if (!session) {
-      alert('Unable to start run: leaderboard session unavailable.');
+      const reason = lastSessionError && lastSessionError.message
+        ? lastSessionError.message
+        : 'leaderboard session unavailable.';
+      alert(`Unable to start run: ${reason}`);
       return false;
     }
     runSummary = createEmptySummary();
@@ -390,6 +414,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
   let visibilityPauseStarted = 0;
   let totalPausedMs = 0;
   let currentPowerDetail = null;
+  let lastSessionError = null;
   const CLIENT_FINGERPRINT = computeClientFingerprint();
 
 
@@ -639,7 +664,6 @@ var parallax = { t:0, clouds:[], mountains:[] };
         currentSession = null;
         finalSummary = null;
         powerRng = null;
-        ensureLeaderboardSession();
         return true;
       } else {
         // failure handled by alert below
@@ -731,7 +755,6 @@ var parallax = { t:0, clouds:[], mountains:[] };
     visibilityPauseStarted = 0;
     totalPausedMs = 0;
     currentPowerDetail = null;
-    ensureLeaderboardSession();
     
     // Reset UI elements
     playerNameSection.style.display = 'none';
