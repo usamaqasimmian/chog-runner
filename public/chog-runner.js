@@ -213,53 +213,73 @@ var parallax = { t:0, clouds:[], mountains:[] };
     }
   }
 
-  async function requestLeaderboardSession(){
-    const response = await fetch('/api/leaderboard/session', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        fingerprint: CLIENT_FINGERPRINT,
-        timezoneOffset: new Date().getTimezoneOffset()
-      })
-    });
-    const raw = await response.text();
-    let payload = {};
-    if (!response.ok) {
-      let message = `Session request failed (${response.status})`;
+  async function requestLeaderboardSession(retries = 2){
+    let lastError = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const data = raw ? JSON.parse(raw) : null;
-        if (data && typeof data.error === 'string' && data.error.trim().length > 0) {
-          message = data.error;
+        const response = await fetch('/api/leaderboard/session', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            fingerprint: CLIENT_FINGERPRINT,
+            timezoneOffset: new Date().getTimezoneOffset()
+          })
+        });
+        const raw = await response.text();
+        let payload = {};
+        if (!response.ok) {
+          let message = `Session request failed (${response.status})`;
+          try {
+            const data = raw ? JSON.parse(raw) : null;
+            if (data && typeof data.error === 'string' && data.error.trim().length > 0) {
+              message = data.error;
+            }
+          } catch (_err) {
+            // ignore parse failure
+          }
+          lastError = new Error(message);
+          if (response.status === 429 || response.status >= 500) {
+            if (attempt < retries) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+              continue;
+            }
+          }
+          throw lastError;
         }
-      } catch (_err) {
-        // ignore parse failure
-      }
-      throw new Error(message);
-    }
-    if (raw) {
-      try {
-        payload = JSON.parse(raw);
+        if (raw) {
+          try {
+            payload = JSON.parse(raw);
+          } catch (error) {
+            throw new Error('Invalid session response');
+          }
+        }
+        currentSession = {
+          id: payload.sessionId,
+          issuedAt: payload.issuedAt || Date.now(),
+          expiresAt: payload.expiresAt || Date.now() + 5 * 60 * 1000,
+          used: false,
+          powerSeed: typeof payload.powerSeed === 'number' ? payload.powerSeed : null,
+          fingerprintHash: payload.fingerprintHash || null,
+          ipHash: payload.ipHash || null
+        };
+        lastSessionError = null;
+        powerRng = currentSession.powerSeed !== null ? createMulberry32(currentSession.powerSeed) : null;
+        if (!running) {
+          scheduleNextPower(true);
+        }
+        return currentSession;
       } catch (error) {
-        throw new Error('Invalid session response');
+        lastError = error;
+        if (attempt < retries && (error.message?.includes('connect') || error.message?.includes('try again') || error.message?.includes('service'))) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          continue;
+        }
       }
     }
-    currentSession = {
-      id: payload.sessionId,
-      issuedAt: payload.issuedAt || Date.now(),
-      expiresAt: payload.expiresAt || Date.now() + 5 * 60 * 1000,
-      used: false,
-      powerSeed: typeof payload.powerSeed === 'number' ? payload.powerSeed : null,
-      fingerprintHash: payload.fingerprintHash || null,
-      ipHash: payload.ipHash || null
-    };
-    lastSessionError = null;
-    powerRng = currentSession.powerSeed !== null ? createMulberry32(currentSession.powerSeed) : null;
-    if (!running) {
-      scheduleNextPower(true);
-    }
-    return currentSession;
+    if (lastError) throw lastError;
+    throw new Error('Session request failed after retries');
   }
 
   function ensureLeaderboardSession(){

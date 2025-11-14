@@ -64,30 +64,6 @@ export default async function handler(req, res) {
       const ip = typeof directIp === 'string' ? directIp : '';
       const ipHash = ip ? crypto.createHash('sha256').update(ip, 'utf8').digest('hex') : null;
 
-      if (ipHash) {
-        const rateKey = `leaderboard:rate:ip:${ipHash}`;
-        const attemptCount = await client.incr(rateKey);
-        if (attemptCount === 1) {
-          await client.pexpire(rateKey, 60 * 1000);
-        }
-        if (attemptCount > 5) {
-          await client.disconnect();
-          return res.status(429).json({ error: 'Too many submissions' });
-        }
-      }
-
-      if (fingerprintHash) {
-        const fpRateKey = `leaderboard:rate:f:${fingerprintHash}`;
-        const fpAttemptCount = await client.incr(fpRateKey);
-        if (fpAttemptCount === 1) {
-          await client.pexpire(fpRateKey, 60 * 1000);
-        }
-        if (fpAttemptCount > 5) {
-          await client.disconnect();
-          return res.status(429).json({ error: 'Too many submissions' });
-        }
-      }
-
       const sessionKey = `leaderboard:session:${sessionId}`;
       const rawSession = await client.get(sessionKey);
       if (!rawSession) {

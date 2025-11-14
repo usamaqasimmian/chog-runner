@@ -97,7 +97,17 @@ export default async function handler(req, res) {
         await client.disconnect();
       } catch (disconnectErr) {}
     }
-    return res.status(500).json({ error: 'Failed to create session' });
+    const isConnectionError = error && (
+      error.message?.includes('connect') ||
+      error.message?.includes('ECONNREFUSED') ||
+      error.message?.includes('ETIMEDOUT') ||
+      error.code === 'ECONNREFUSED' ||
+      error.code === 'ETIMEDOUT'
+    );
+    const errorMessage = isConnectionError
+      ? 'Unable to connect to leaderboard service. Please try again in a moment.'
+      : 'Failed to create session. Please try again.';
+    return res.status(500).json({ error: errorMessage });
   }
 
   try {
