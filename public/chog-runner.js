@@ -318,14 +318,19 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (!runSummary || !runSummary.startedAt) return;
     runSummary.frames += 1;
     runSummary.baseScore += baseDelta;
-    if (scoreMultiplier > 1){
+    const hasActiveMultiplier = multiplierFor > 0;
+    const hasActivePowerDetail = currentPowerDetail !== null;
+    if (hasActiveMultiplier && hasActivePowerDetail){
       runSummary.multiplierFrames += 1;
       const bonus = baseDelta * (scoreMultiplier - 1);
       runSummary.multiplierBonus += bonus;
+      currentPowerDetail.multiplierFrames += 1;
+    } else if (scoreMultiplier > 1){
+      const bonus = baseDelta * (scoreMultiplier - 1);
+      runSummary.multiplierBonus += bonus;
     }
-    if (currentPowerDetail){
-      if (invincibleFor > 0) currentPowerDetail.invFrames += 1;
-      if (multiplierFor > 0) currentPowerDetail.multiplierFrames += 1;
+    if (hasActivePowerDetail && invincibleFor > 0) {
+      currentPowerDetail.invFrames += 1;
     }
     score = computeScoreFromSummary(runSummary);
   }
