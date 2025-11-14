@@ -307,6 +307,13 @@ var parallax = { t:0, clouds:[], mountains:[] };
     lastInputAt = Date.now();
   }
 
+  function getRunFrameCount(){
+    if (runSummary && typeof runSummary.frames === 'number' && Number.isFinite(runSummary.frames)) {
+      return runSummary.frames;
+    }
+    return 0;
+  }
+
   function applyFrameScore(baseDelta){
     if (!runSummary || !runSummary.startedAt) return;
     runSummary.frames += 1;
@@ -333,13 +340,14 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (!runSummary || !runSummary.startedAt) return;
     runSummary.powerCoinsCollected += 1;
     if (currentPowerDetail && !currentPowerDetail.endFrame) {
-      currentPowerDetail.endFrame = world.t;
+      currentPowerDetail.endFrame = getRunFrameCount();
       runSummary.powerDetails.push(currentPowerDetail);
     }
+    const frameCount = getRunFrameCount();
     currentPowerDetail = {
       type: powerCoin.type ?? 0,
-      collectedAt: world.t,
-      startFrame: world.t,
+      collectedAt: frameCount,
+      startFrame: frameCount,
       multiplierFrames: 0,
       invFrames: 0,
       endFrame: null
@@ -355,7 +363,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
     runSummary.endedAt = Date.now();
      runSummary.pausedMs = totalPausedMs;
      if (currentPowerDetail && !currentPowerDetail.endFrame) {
-       currentPowerDetail.endFrame = world.t;
+       currentPowerDetail.endFrame = getRunFrameCount();
        runSummary.powerDetails.push(currentPowerDetail);
        currentPowerDetail = null;
      }
@@ -931,7 +939,7 @@ var parallax = { t:0, clouds:[], mountains:[] };
     if (multiplierFor > 0) multiplierFor--;
     scoreMultiplier = (multiplierFor > 0) ? 50 : 1;
     if (currentPowerDetail && invincibleFor <= 0 && multiplierFor <= 0) {
-      currentPowerDetail.endFrame = world.t;
+      currentPowerDetail.endFrame = getRunFrameCount();
       runSummary.powerDetails.push(currentPowerDetail);
       currentPowerDetail = null;
       allowDoubleJump = false;
